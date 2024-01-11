@@ -41,6 +41,7 @@ async def main():
         else:
             while True:
                 await worker()
+                logger.info(f"Pausing for {config.pause}s ...")
                 await sleep(config.pause)
 
 
