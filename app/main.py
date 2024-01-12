@@ -40,7 +40,7 @@ async def worker():
                                     )):
                     await deduplicate_profile(profile.id, profile.ids)
             except Exception as e:
-                logger.error(f"Error for profile {profile_record.get('id', "unknown")}: {str(e)}")
+                logger.error(f"Error for profile {profile_record}: {str(e)}")
         logger.info(f"Merged {no_of_profiles} ...")
         logger.info("No more profiles to merge. Merging finished ...")
     except Exception as e:
