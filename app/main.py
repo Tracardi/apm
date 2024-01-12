@@ -26,18 +26,21 @@ async def worker():
         logger.info("Starting single tenant auto profile merging worker...")
         no_of_profiles = 0
         async for profile_record in load_profiles_for_auto_merge():
-            profile = profile_record.to_entity(Profile)
-            no_of_profiles += 1
-            _redis = RedisClient()
-            async with (
-                GlobalMutexLock(get_entity_id(profile),
-                                'profile',
-                                namespace=Collection.lock_tracker,
-                                redis=_redis,
-                                name='profile_merging_worker',
-                                lock_ttl=5
-                                )):
-                await deduplicate_profile(profile.id, profile.ids)
+            try:
+                profile = profile_record.to_entity(Profile)
+                no_of_profiles += 1
+                _redis = RedisClient()
+                async with (
+                    GlobalMutexLock(get_entity_id(profile),
+                                    'profile',
+                                    namespace=Collection.lock_tracker,
+                                    redis=_redis,
+                                    name='profile_merging_worker',
+                                    lock_ttl=5
+                                    )):
+                    await deduplicate_profile(profile.id, profile.ids)
+            except Exception as e:
+                logger.error(f"Error for profile {profile_record.get('id', "unknown")}: {str(e)}")
         logger.info(f"Merged {no_of_profiles} ...")
         logger.info("No more profiles to merge. Merging finished ...")
     except Exception as e:
