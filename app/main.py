@@ -12,7 +12,7 @@ from tracardi.service.profile_deduplicator import deduplicate_profile
 from tracardi.service.storage.driver.elastic.profile import load_profiles_for_auto_merge
 from tracardi.service.storage.redis.collections import Collection
 from tracardi.service.storage.redis_client import RedisClient
-from tracardi.service.tracking.locking import GlobalMutexLock
+from tracardi.service.tracking.locking import mutex, Lock
 from tracardi.service.utils.getters import get_entity_id
 
 logger = logging.getLogger(__name__)
@@ -30,14 +30,9 @@ async def worker():
                 profile = profile_record.to_entity(Profile)
                 no_of_profiles += 1
                 _redis = RedisClient()
-                async with (
-                    GlobalMutexLock(get_entity_id(profile),
-                                    'profile',
-                                    namespace=Collection.lock_tracker,
-                                    redis=_redis,
-                                    name='profile_merging_worker',
-                                    lock_ttl=5
-                                    )):
+                key = Lock.get_key(Collection.lock_tracker, "profile", get_entity_id(profile))
+                lock = Lock(_redis, key, default_lock_ttl=5)
+                async with mutex(lock, name='profile_merging_worker'):
                     await deduplicate_profile(profile.id, profile.ids)
             except Exception as e:
                 logger.error(f"Error for profile {profile_record}: {str(e)}")
