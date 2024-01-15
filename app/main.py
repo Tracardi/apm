@@ -42,13 +42,7 @@ async def worker():
         logger.error(f"Error: {str(e)}")
 
 
-async def main():
-    production = os.environ.get('PRODUCTION', 'no') == 'yes'
-    tenant = os.environ.get('TENANT', tracardi.version.name)
-
-    await wait_for_connection()
-
-    context = Context(production=production, tenant=tenant)
+async def run(context: Context):
     with ServerContext(context):
         if config.mode == 'job':
             await worker()
@@ -58,5 +52,15 @@ async def main():
                 logger.info(f"Pausing for {config.pause}s ...")
                 await sleep(config.pause)
 
+async def main():
+    production = os.environ.get('PRODUCTION', None)
+    tenant = os.environ.get('TENANT', tracardi.version.name)
+
+    await wait_for_connection()
+
+    if production is None or production == 'yes':
+        await run(context = Context(production=True, tenant=tenant))
+    if production is None or production == 'no':
+        await run(context = Context(production=False, tenant=tenant))
 
 MainLoop(main)
