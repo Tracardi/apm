@@ -3,17 +3,22 @@ import os
 from asyncio import sleep
 
 from aio.loop import MainLoop
+
 from config import config
 from tracardi.config import tracardi
-from tracardi.context import ServerContext, Context
+from tracardi.context import ServerContext, Context, get_context
 from tracardi.domain.profile import Profile
 from tracardi.service.elastic.connection import wait_for_connection
+from tracardi.service.license import License, LICENSE
 from tracardi.service.profile_deduplicator import deduplicate_profile
 from tracardi.service.storage.driver.elastic.profile import load_profiles_for_auto_merge
 from tracardi.service.storage.redis.collections import Collection
 from tracardi.service.storage.redis_client import RedisClient
 from tracardi.service.tracking.locking import async_mutex, Lock
 from tracardi.service.utils.getters import get_entity_id
+
+if License.has_service(LICENSE):
+    from com_tracardi.service.multi_tenant_manager import MultiTenantManager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -23,7 +28,7 @@ print(f"TRACARDI version {tracardi.version}")
 
 async def worker():
     try:
-        logger.info("Starting single tenant auto profile merging worker...")
+        logger.info(f"Merging in context {get_context()}...")
         no_of_profiles = 0
         async for profile_record in load_profiles_for_auto_merge():
             try:
@@ -42,7 +47,7 @@ async def worker():
         logger.error(f"Error: {str(e)}")
 
 
-async def run(context: Context):
+async def run_in_context(context: Context):
     with ServerContext(context):
         if config.mode == 'job':
             await worker()
@@ -52,15 +57,35 @@ async def run(context: Context):
                 logger.info(f"Pausing for {config.pause}s ...")
                 await sleep(config.pause)
 
-async def main():
-    production = os.environ.get('PRODUCTION', None)
-    tenant = os.environ.get('TENANT', tracardi.version.name)
 
-    await wait_for_connection()
+async def start(tenant: str):
+    production = os.environ.get('PRODUCTION', None)
 
     if production is None or production == 'yes':
-        await run(context = Context(production=True, tenant=tenant))
+        await run_in_context(context=Context(production=True, tenant=tenant))
     if production is None or production == 'no':
-        await run(context = Context(production=False, tenant=tenant))
+        await run_in_context(context=Context(production=False, tenant=tenant))
+
+
+async def main():
+    await wait_for_connection()
+
+    if License.has_service(LICENSE) and tracardi.multi_tenant:
+        logger.info(f"Starting multi tenant auto profile merging worker...")
+        tms = MultiTenantManager()
+        if not tracardi.multi_tenant_manager_api_key:
+            raise ConnectionError("TMS URL or API_KEY not defined.")
+        await tms.authorize(tracardi.multi_tenant_manager_api_key)
+        tenants = [tenant async for tenant in tms.list_tenants()]
+
+        logger.info(f"Found {len(tenants)} tenants...")
+        for tenant in tenants:
+            logger.info(f"Running tenant `{tenant.id}`...")
+            await start(tenant.id)
+    else:
+        logger.info("Starting single tenant auto profile merging worker...")
+        tenant = os.environ.get('TENANT', tracardi.version.name)
+        await start(tenant)
+
 
 MainLoop(main)
