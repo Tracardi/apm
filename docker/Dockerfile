@@ -17,6 +17,7 @@ RUN $VIRTUAL_ENV/bin/pip install wheel
 RUN $VIRTUAL_ENV/bin/pip --default-timeout=360 install -r requirements.txt
 
 COPY app app
+COPY prerequisites/com_tracardi /app/com_tracardi
 
 ENV PYTHONUNBUFFERED=1
 
