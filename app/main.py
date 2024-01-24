@@ -11,7 +11,8 @@ from tracardi.domain.profile import Profile
 from tracardi.service.elastic.connection import wait_for_connection
 from tracardi.service.license import License, LICENSE
 from tracardi.service.profile_deduplicator import deduplicate_profile
-from tracardi.service.storage.driver.elastic.profile import load_profiles_for_auto_merge
+from tracardi.service.storage.driver.elastic.profile import load_profiles_for_auto_merge, \
+    load_profiles_with_duplicated_ids, load_by_ids
 from tracardi.service.storage.redis.collections import Collection
 from tracardi.service.storage.redis_client import RedisClient
 from tracardi.service.tracking.locking import async_mutex, Lock
@@ -26,21 +27,33 @@ logger.setLevel(logging.INFO)
 print(f"TRACARDI version {tracardi.version}")
 
 
+async def _deduplicate(_redis, profile_record):
+    try:
+        profile = profile_record.to_entity(Profile)
+        key = Lock.get_key(Collection.lock_tracker, "profile", get_entity_id(profile))
+        lock = Lock(_redis, key, default_lock_ttl=5)
+        async with async_mutex(lock, name='profile_merging_worker'):
+            await deduplicate_profile(profile.id, profile.ids)
+    except Exception as e:
+        logger.error(f"Error for profile {profile_record}: {str(e)}")
+
+
 async def worker():
     try:
         logger.info(f"Merging in context {get_context()}...")
         no_of_profiles = 0
+        _redis = RedisClient()
+
+        profile_ids = {profile_id async for profile_id in load_profiles_with_duplicated_ids()}
+        logger.info(f"Found {len(profile_ids)} duplicated ids in context {get_context()}...")
+        async for profile_record in load_by_ids(list(profile_ids), batch=1000):
+            no_of_profiles += 1
+            await _deduplicate(_redis, profile_record)
+
         async for profile_record in load_profiles_for_auto_merge():
-            try:
-                profile = profile_record.to_entity(Profile)
-                no_of_profiles += 1
-                _redis = RedisClient()
-                key = Lock.get_key(Collection.lock_tracker, "profile", get_entity_id(profile))
-                lock = Lock(_redis, key, default_lock_ttl=5)
-                async with async_mutex(lock, name='profile_merging_worker'):
-                    await deduplicate_profile(profile.id, profile.ids)
-            except Exception as e:
-                logger.error(f"Error for profile {profile_record}: {str(e)}")
+            no_of_profiles += 1
+            await _deduplicate(_redis, profile_record)
+
         logger.info(f"Merged {no_of_profiles} ...")
         logger.info("No more profiles to merge. Merging finished ...")
     except Exception as e:
