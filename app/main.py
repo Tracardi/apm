@@ -46,11 +46,12 @@ async def worker():
 
         profile_ids = {profile_id async for profile_id in load_profiles_with_duplicated_ids()}
         logger.info(f"Found {len(profile_ids)} duplicated ids in context {get_context()}...")
-        async for profile_record in load_by_ids(list(profile_ids), batch=1000):
+
+        async for profile_record in load_profiles_for_auto_merge():
             no_of_profiles += 1
             await _deduplicate(_redis, profile_record)
 
-        async for profile_record in load_profiles_for_auto_merge():
+        async for profile_record in load_by_ids(list(profile_ids), batch=1000):
             no_of_profiles += 1
             await _deduplicate(_redis, profile_record)
 
