@@ -85,7 +85,7 @@ async def main():
     await wait_for_connection()
 
     if License.has_service(LICENSE) and tracardi.multi_tenant:
-        logger.info(f"Starting multi tenant auto profile merging worker...")
+        logger.info(f"Starting multi tenant auto profile merging worker in mode {config.mode}...")
         tms = MultiTenantManager()
         if not tracardi.multi_tenant_manager_api_key:
             raise ConnectionError("TMS URL or API_KEY not defined.")
