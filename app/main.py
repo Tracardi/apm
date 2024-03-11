@@ -61,24 +61,20 @@ async def worker():
         logger.error(f"Error: {str(e)}")
 
 
-async def run_in_context(context: Context):
-    with ServerContext(context):
-        if config.mode == 'job':
-            await worker()
-        else:
-            while True:
-                await worker()
-                logger.info(f"Pausing for {config.pause}s ...")
-                await sleep(config.pause)
-
-
 async def start(tenant: str):
-    production = os.environ.get('PRODUCTION', None)
-
-    if production is None or production == 'yes':
-        await run_in_context(context=Context(production=True, tenant=tenant))
-    if production is None or production == 'no':
-        await run_in_context(context=Context(production=False, tenant=tenant))
+    if config.mode == 'job':
+        with ServerContext(Context(production=True, tenant=tenant)):
+            await worker()
+        with ServerContext(Context(production=False, tenant=tenant)):
+            await worker()
+    else:
+        while True:
+            with ServerContext(Context(production=True, tenant=tenant)):
+                await worker()
+            with ServerContext(Context(production=False, tenant=tenant)):
+                await worker()
+            logger.info(f"Pausing for {config.pause}s ...")
+            await sleep(config.pause)
 
 
 async def main():
