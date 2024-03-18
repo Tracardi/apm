@@ -86,6 +86,7 @@ async def main():
         if not tracardi.multi_tenant_manager_api_key:
             raise ConnectionError("TMS URL or API_KEY not defined.")
         await tms.authorize(tracardi.multi_tenant_manager_api_key)
+        logger.info(f"Loading tenants form {tms.tenants_endpoint}...")
         tenants = [tenant async for tenant in tms.list_tenants()]
 
         logger.info(f"Found {len(tenants)} tenants...")
