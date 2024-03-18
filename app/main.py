@@ -69,24 +69,26 @@ async def start_worker(tenant: str):
 
 
 async def _main():
-    if License.has_service(LICENSE) and tracardi.multi_tenant:
-        logger.info(f"Starting multi tenant auto profile merging worker in mode {config.mode}...")
-        tms = MultiTenantManager()
-        if not tracardi.multi_tenant_manager_api_key:
-            raise ConnectionError("TMS URL or API_KEY not defined.")
-        await tms.authorize(tracardi.multi_tenant_manager_api_key)
-        logger.info(f"Loading tenants form {tms.tenants_endpoint}...")
-        tenants = [tenant async for tenant in tms.list_tenants()]
+    try:
+        if License.has_service(LICENSE) and tracardi.multi_tenant:
+            logger.info(f"Starting multi tenant auto profile merging worker in mode {config.mode}...")
+            tms = MultiTenantManager()
+            if not tracardi.multi_tenant_manager_api_key:
+                raise ConnectionError("TMS URL or API_KEY not defined.")
+            await tms.authorize(tracardi.multi_tenant_manager_api_key)
+            logger.info(f"Loading tenants form {tms.tenants_endpoint}...")
+            tenants = [tenant async for tenant in tms.list_tenants()]
 
-        logger.info(f"Found {len(tenants)} tenants...")
-        for tenant in tenants:
-            logger.info(f"Running tenant `{tenant.id}`...")
-            await start_worker(tenant.id)
-    else:
-        logger.info("Starting single tenant auto profile merging worker...")
-        tenant = os.environ.get('TENANT', tracardi.version.name)
-        await start_worker(tenant)
-
+            logger.info(f"Found {len(tenants)} tenants...")
+            for tenant in tenants:
+                logger.info(f"Running tenant `{tenant.id}`...")
+                await start_worker(tenant.id)
+        else:
+            logger.info("Starting single tenant auto profile merging worker...")
+            tenant = os.environ.get('TENANT', tracardi.version.name)
+            await start_worker(tenant)
+    except Exception as e:
+        logger.info(f"Error: {str(e)}...")
 
 async def main():
     if config.mode == 'job':
