@@ -61,25 +61,14 @@ async def worker():
         logger.error(f"Error: {str(e)}")
 
 
-async def start(tenant: str):
-    if config.mode == 'job':
-        with ServerContext(Context(production=True, tenant=tenant)):
-            await worker()
-        with ServerContext(Context(production=False, tenant=tenant)):
-            await worker()
-    else:
-        while True:
-            with ServerContext(Context(production=True, tenant=tenant)):
-                await worker()
-            with ServerContext(Context(production=False, tenant=tenant)):
-                await worker()
-            logger.info(f"Pausing for {config.pause}s ...")
-            await sleep(config.pause)
+async def start_worker(tenant: str):
+    with ServerContext(Context(production=True, tenant=tenant)):
+        await worker()
+    with ServerContext(Context(production=False, tenant=tenant)):
+        await worker()
 
 
-async def main():
-    await wait_for_connection()
-
+async def _main():
     if License.has_service(LICENSE) and tracardi.multi_tenant:
         logger.info(f"Starting multi tenant auto profile merging worker in mode {config.mode}...")
         tms = MultiTenantManager()
@@ -92,11 +81,21 @@ async def main():
         logger.info(f"Found {len(tenants)} tenants...")
         for tenant in tenants:
             logger.info(f"Running tenant `{tenant.id}`...")
-            await start(tenant.id)
+            await start_worker(tenant.id)
     else:
         logger.info("Starting single tenant auto profile merging worker...")
         tenant = os.environ.get('TENANT', tracardi.version.name)
-        await start(tenant)
+        await start_worker(tenant)
+
+
+async def main():
+    if config.mode == 'job':
+        await _main()
+    else:
+        while True:
+            await _main()
+            logger.info(f"Pausing for {config.pause}s ...")
+            await sleep(config.pause)
 
 
 MainLoop(main)
