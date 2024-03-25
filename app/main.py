@@ -1,4 +1,3 @@
-import logging
 import os
 from asyncio import sleep
 
@@ -7,7 +6,10 @@ from aio.loop import MainLoop
 from config import config
 from tracardi.config import tracardi
 from tracardi.context import ServerContext, Context, get_context
+from tracardi.domain import ExtraInfo
 from tracardi.domain.profile import Profile
+from tracardi.exceptions.exception import StorageException
+from tracardi.exceptions.log_handler import get_logger
 from tracardi.service.elastic.connection import wait_for_connection
 from tracardi.service.license import License, LICENSE
 from tracardi.service.profile_deduplicator import deduplicate_profile
@@ -21,8 +23,7 @@ from tracardi.service.utils.getters import get_entity_id
 if License.has_service(LICENSE):
     from com_tracardi.service.multi_tenant_manager import MultiTenantManager
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 print(f"TRACARDI version {tracardi.version}")
 
@@ -40,12 +41,12 @@ async def _deduplicate(_redis, profile_record):
 
 async def worker():
     try:
-        logger.info(f"Merging in context {get_context()}...")
+        logger.info(f"Merging in context {get_context()}...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
         no_of_profiles = 0
         _redis = RedisClient()
 
-        profile_ids = {profile_id async for profile_id in load_profiles_with_duplicated_ids()}
-        logger.info(f"Found {len(profile_ids)} duplicated ids in context {get_context()}...")
+        profile_ids = {profile_id async for profile_id in load_profiles_with_duplicated_ids(log_error=False)}
+        logger.info(f"Found {len(profile_ids)} duplicated ids in context {get_context()}...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
 
         async for profile_record in load_profiles_for_auto_merge():
             no_of_profiles += 1
@@ -55,10 +56,12 @@ async def worker():
             no_of_profiles += 1
             await _deduplicate(_redis, profile_record)
 
-        logger.info(f"Merged {no_of_profiles} ...")
-        logger.info("No more profiles to merge. Merging finished ...")
+        logger.info(f"Merged {no_of_profiles} ...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
+        logger.info("No more profiles to merge. Merging finished ...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
+    except StorageException as e:
+        logger.warning(f"Error while loading profiles. Is system installed?. Details: {str(e)}", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Error: {str(e)}", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
 
 
 async def start_worker(tenant: str):
@@ -69,26 +72,29 @@ async def start_worker(tenant: str):
 
 
 async def _main():
+    await wait_for_connection(no_of_tries=10)
+
     try:
         if License.has_service(LICENSE) and tracardi.multi_tenant:
-            logger.info(f"Starting multi tenant auto profile merging worker in mode {config.mode}...")
+            logger.info(f"Starting multi tenant auto profile merging worker in mode {config.mode}...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
             tms = MultiTenantManager()
             if not tracardi.multi_tenant_manager_api_key:
                 raise ConnectionError("TMS URL or API_KEY not defined.")
             await tms.authorize(tracardi.multi_tenant_manager_api_key)
-            logger.info(f"Loading tenants form {tms.tenants_endpoint}...")
+            logger.info(f"Loading tenants form {tms.tenants_endpoint}...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
             tenants = [tenant async for tenant in tms.list_tenants()]
 
-            logger.info(f"Found {len(tenants)} tenants...")
+            logger.info(f"Found {len(tenants)} tenants...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
             for tenant in tenants:
-                logger.info(f"Running tenant `{tenant.id}`...")
+                logger.info(f"Running tenant `{tenant.id}`...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
                 await start_worker(tenant.id)
         else:
-            logger.info("Starting single tenant auto profile merging worker...")
+            logger.info("Starting single tenant auto profile merging worker...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
             tenant = os.environ.get('TENANT', tracardi.version.name)
             await start_worker(tenant)
     except Exception as e:
-        logger.info(f"Error: {str(e)}...")
+        logger.info(f"Error: {str(e)}...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
+
 
 async def main():
     if config.mode == 'job':
@@ -96,7 +102,7 @@ async def main():
     else:
         while True:
             await _main()
-            logger.info(f"Pausing for {config.pause}s ...")
+            logger.info(f"Pausing for {config.pause}s ...", extra=ExtraInfo.exact(origin="APM", package=__name__, class_name="worker"))
             await sleep(config.pause)
 
 
